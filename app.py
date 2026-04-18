@@ -34,6 +34,9 @@ states = [
 state = st.selectbox("State", states)
 
 dsc_count = st.number_input("No. of DSC", min_value=0, value=2, step=1)
+
+if company_type == "Public Limited" and dsc_count < 3:
+    st.warning("Public Ltd usually requires minimum 3 directors")
 compliance = st.selectbox("Compliance Commitment?", ["Yes", "No"])
 
 
@@ -60,11 +63,17 @@ def calculate_cost():
     dsc_cost = dsc_count * 2000
 
     if company_type == "Section 8":
-        prof_fee = 3500
+        base_fee = 3500
     elif company_type == "Public Limited":
-        prof_fee = 5000
+        base_fee = 5000
     else:
-        prof_fee = 2000 if compliance == "Yes" else 5000
+        base_fee = 2000
+
+    # 🔹 Compliance logic
+    if compliance == "Yes":
+        prof_fee = base_fee
+    else:
+        prof_fee = max(base_fee * 2,5000)
 
     if company_type == "LLP":
         stamp = 500
@@ -76,7 +85,7 @@ def calculate_cost():
     subtotal_base = run_fee + dsc_cost + stamp
     subtotal = subtotal_base + prof_fee
     gst = subtotal * 0.18
-    total = subtotal + gst
+    total = int((subtotal + gst) // 50) * 50
 
     return run_fee, dsc_cost, prof_fee, stamp, label, subtotal_base, subtotal, gst, total
 
@@ -116,7 +125,7 @@ def generate_pdf():
 
     story.append(Paragraph(
         "As per our telephonic conversation regarding your inquiry, "
-        "<b>we are pleased to share our Company registration proposal with you.</b>",
+        "<b>we are pleased to share our proposal for Company registration with you.</b>",
         normal
     ))
     story.append(Spacer(1, 10))
@@ -126,7 +135,7 @@ def generate_pdf():
         ["Client Name", client_name],
         ["Company Type", company_type],
         ["State", state],
-        ["Date", datetime.now().strftime("%d %B %Y")]
+        ["Proposal Date", datetime.now().strftime("%d %B %Y")]
     ]
 
     table = Table(client_data, colWidths=[150, 250])
@@ -138,26 +147,60 @@ def generate_pdf():
     story.append(table)
     story.append(Spacer(1, 15))
 
-    # 🔹 Scope
+        # 🔹 Scope
     story.append(Paragraph("<b>Scope of Services:</b>", heading))
+
+    # 🔹 Dynamic Scope based on Company Type
+    adjusted_dsc = dsc_count  # always user input
+
+    if company_type == "LLP":
+        role = "Partners"
+        deed_text = "LLP Deed"
+
+    elif company_type == "OPC":
+        role = "Director & Nominee"
+        deed_text = "Memorandum & Articles (MOA & AOA)"
+
+    else:
+        role = "Directors"
+        deed_text = "Memorandum & Articles (MOA & AOA)"
 
     scope = [
         "Name Approval (RUN-Filing once)",
         "Company Incorporation Certificate (COI)",
-        "Article of Association (AOA)",
-        "Memorandum of Association (MOA)",
+        deed_text,
         "Company PAN & TAN Registration",
         "Bank Account Opening Support (BR)"
     ]
 
-    if dsc_count > 0:
-        scope.insert(4, f"{dsc_count} Directors – Digital Signature Certificate (Class-3)")
-        scope.insert(5, f"{dsc_count} Directors – Director Identification Number (DIN)")
+    # DSC / DIN
+    if adjusted_dsc > 0:
 
+        # 🔹 OPC special case
+        if company_type == "OPC":
+
+            if adjusted_dsc == 0:
+                pass  # kuch add nahi karna
+
+            elif adjusted_dsc == 1:
+                scope.insert(3, "1 DSC – Digital Signature Certificate (Class-3)")
+                scope.insert(4, "1 Director Identification Number")
+
+            elif adjusted_dsc == 2:
+                scope.insert(3, "1 Director & 1 Nominee (2 nos) – Digital Signature Certificate (Class-3)")
+                scope.insert(4, "1 Director Identification Number")
+
+        # 🔹 बाकी सभी cases
+        else:
+            scope.insert(3, f"{adjusted_dsc} {role} – Digital Signature Certificate (Class-3)")
+            scope.insert(4, f"{adjusted_dsc} {role} – Identification Number")
+
+    # PF / ESIC (not for LLP)
     if company_type != "LLP":
         scope.append("PF Registration")
         scope.append("ESIC Registration")
 
+    # Add to PDF
     for s in scope:
         story.append(Paragraph(f"• {s}", normal))
 
@@ -173,17 +216,46 @@ def generate_pdf():
     # 🔹 Documents
     story.append(Paragraph("<b>Required Documents for Company Registration:</b>", heading))
 
-    docs = [
-        "At least 2 Proposed Company Names",
-        "Nature of Business",
-        "Aadhar Card & PAN Card of All Directors",
-        "Contact Number & Email ID of All Directors",
-        "Passport Size Photograph of All Directors",
-        "Business Premises Photos (Inside & Outside)",
-        "Latest Bank Statement (with Name & Address)",
-        "Latest Electricity Bill (Office Address Proof)",
-        "Rent Agreement (if rented) along with Owner PAN & Contact Details"
-    ]
+    # 🔹 Documents (Dynamic based on Company Type)
+    if company_type == "LLP":
+        docs = [
+            "At least 2 Proposed LLP Names",
+            "Nature of Business",
+            "Aadhar Card & PAN Card of All Partners",
+            "Contact Number & Email ID of All Partners",
+            "Passport Size Photograph of All Partners",
+            "Business Premises Photos (Inside & Outside)",
+            "Latest Bank Statement (with Name & Address)",
+            "Latest Electricity Bill (Office Address Proof)",
+            "Rent Agreement (if rented) along with Owner PAN & Contact Details"
+        ]
+
+    elif company_type == "OPC":
+        docs = [
+            "At least 2 Proposed Company Names",
+            "Nature of Business",
+            "Aadhar Card & PAN Card of Director",
+            "Aadhar Card & PAN Card of Nominee",
+            "Contact Number & Email ID of Director & Nominee",
+            "Passport Size Photograph of Director & Nominee",
+            "Business Premises Photos (Inside & Outside)",
+            "Latest Bank Statement (with Name & Address)",
+            "Latest Electricity Bill (Office Address Proof)",
+            "Rent Agreement (if rented) along with Owner PAN & Contact Details"
+        ]
+
+    else:
+        docs = [
+            "At least 2 Proposed Company Names",
+            "Nature of Business",
+            "Aadhar Card & PAN Card of All Directors",
+            "Contact Number & Email ID of All Directors",
+            "Passport Size Photograph of All Directors",
+            "Business Premises Photos (Inside & Outside)",
+            "Latest Bank Statement (with Name & Address)",
+            "Latest Electricity Bill (Office Address Proof)",
+            "Rent Agreement (if rented) along with Owner PAN & Contact Details"
+        ]
 
     for d in docs:
         story.append(Paragraph(f"• {d}", normal))
@@ -232,12 +304,12 @@ def generate_pdf():
 
     timeline = [
         ["Step","Process","Time"],
-        ["1","Name Approval(Run Filing)","7-8 days"],
+        ["1","Name Approval(Run Filing)","6-7 days"],
         ["2","DSC Creation","3-4 days"],
         ["3","MOA & AOA Drafting","2-3 days"],
         ["4","Incorporation Filing (Spice+)","3-4 days"],
         ["5","COI Issuance+ DIN/PAN/TAN/CIN Allocation","8-10 days"],
-        ["","Total","30 days"]
+        ["","Total","25-30 days"]
     ]
 
     ttable = Table(timeline, colWidths=[60,220,120])
@@ -261,7 +333,7 @@ def generate_pdf():
     story.append(Paragraph("<b>Important Notes:</b>", heading))
     story.append(Paragraph("• Payment must be cleared after RUN approval.", normal))
     story.append(Paragraph("• RUN does not guarantee name approval. Re-application will be charged separately.", normal))
-    
+
     # 🔹 Closing
     story.append(Spacer(1, 15))
     story.append(Paragraph("<b>Warm Regards,</b>", normal))
