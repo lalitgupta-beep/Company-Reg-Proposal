@@ -1,356 +1,451 @@
 import streamlit as st
-from datetime import datetime
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, PageBreak
+import pandas as pd
+from io import BytesIO
+
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
 from reportlab.lib.styles import getSampleStyleSheet
+
+st.set_page_config(page_title="Client Renewal Dashboard", layout="wide")
+
+# -------------------------
+# CSS
+# -------------------------
+st.markdown("""
+<style>
+.card {
+    padding: 12px;
+    border-radius: 10px;
+    background: #ffffff;
+    border: 1px solid #e5e7eb;
+    margin-bottom: 8px;
+}
+.label {font-size:11px;color:#6b7280;}
+.value {font-size:15px;font-weight:600;}
+.primary {background:#4f46e5;color:white;}
+.success {background:#059669;color:white;}
+.primary .label, .primary .value,
+.success .label, .success .value {
+    color:white !important;
+}
+</style>
+""", unsafe_allow_html=True)
+
+# -------------------------
+# LOAD DATA
+# -------------------------
+df = pd.read_excel("client_renewal_backend_data.xlsx")
+df.columns = df.columns.str.strip()
+
+def format_inr(x):
+    try:
+        return f"₹{int(x):,}"
+    except:
+        return "₹0"
+
+# -------------------------
+# PDF FUNCTION
+# -------------------------
+from io import BytesIO
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Image, Table, TableStyle
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4
-import tempfile
+from datetime import datetime
+import pandas as pd
 
-st.set_page_config(page_title="Proposal Generator", layout="centered")
+def safe_int(val):
+    if pd.isna(val):
+        return 0
+    try:
+        return int(val)
+    except:
+        return 0
 
-st.title("📄 Company Registration Proposal Maker")
-
-# 🔹 Consultant Inputs
-consultant_name = st.text_input("Startup Consultant Name")
-consultant_mobile = st.text_input("Mobile Number")
-consultant_email = st.text_input("Email ID")
-
-# 🔹 Inputs
-client_name = st.text_input("Client Name")
-
-company_type = st.selectbox("Company Type", [
-    "Private Limited", "LLP", "Section 8", "OPC", "Public Limited"
-])
-
-states = [
-    "Bihar","Chandigarh","Delhi","Andhra Pradesh","Assam","Chhattisgarh",
-    "Haryana","Himachal Pradesh","Jharkhand","Karnataka","Kerala","Gujarat",
-    "Madhya Pradesh","Maharashtra","Odisha","Punjab","Rajasthan",
-    "Jammu & Kashmir","Uttarakhand","Uttar Pradesh","Tamil Nadu",
-    "Andaman & Nicobar","Mizoram","Sikkim","Puducherry","Ladakh",
-    "Nagaland","Daman & Diu","Lakshadweep","Meghalaya","Tripura",
-    "Arunachal Pradesh","West Bengal","Dadra & Nagar Haveli"
-]
-
-state = st.selectbox("State", states)
-
-dsc_count = st.number_input("No. of DSC", min_value=0, value=2, step=1)
-
-if company_type == "Public Limited" and dsc_count < 3:
-    st.warning("Public Ltd usually requires minimum 3 directors")
-compliance = st.selectbox("Compliance Commitment?", ["Yes", "No"])
+def gst_breakup(amount):
+    base = int(round(amount / 1.18))
+    gst = amount - base
+    return base, gst
 
 
-# 🔹 Stamp Duty
-def get_stamp_duty(state):
-    mapping = {
-        "Bihar":1520,"Chandigarh":1503,"Delhi":360,"Andhra Pradesh":1520,
-        "Assam":525,"Chhattisgarh":1510,"Haryana":135,"Himachal Pradesh":123,
-        "Jharkhand":173,"Karnataka":10020,"Kerala":3025,"Gujarat":620,
-        "Madhya Pradesh":7550,"Maharashtra":1300,"Odisha":610,"Punjab":10025,
-        "Rajasthan":5510,"Jammu & Kashmir":310,"Uttarakhand":1010,
-        "Uttar Pradesh":1010,"Tamil Nadu":520,"Andaman & Nicobar":520,
-        "Mizoram":260,"Sikkim":143,"Puducherry":510,"Ladakh":143,
-        "Nagaland":260,"Daman & Diu":1170,"Lakshadweep":1525,
-        "Meghalaya":410,"Tripura":260,"Arunachal Pradesh":710,
-        "West Bengal":370,"Dadra & Nagar Haveli":184
-    }
-    return mapping.get(state, 1000)
+def generate_pdf_bytes(client_name, entity_type, plan, renewal, offer, tax_audit):
 
+    buffer = BytesIO()
 
-# 🔹 Cost Calculation
-def calculate_cost():
-    run_fee = 1000 if company_type == "LLP" else 2000
-    dsc_cost = dsc_count * 2000
-
-    if company_type == "Section 8":
-        base_fee = 3500
-    elif company_type == "Public Limited":
-        base_fee = 5000
-    else:
-        base_fee = 2000
-
-    # 🔹 Compliance logic
-    if compliance == "Yes":
-        prof_fee = base_fee
-    else:
-        prof_fee = max(base_fee * 2,5000)
-
-    if company_type == "LLP":
-        stamp = 500
-        label = "FiLLiP Fee (LLP Filing)"
-    else:
-        stamp = get_stamp_duty(state)
-        label = f"Stamp Duty (of {state})"
-
-    subtotal_base = run_fee + dsc_cost + stamp
-    subtotal = subtotal_base + prof_fee
-    gst = subtotal * 0.18
-    total = int((subtotal + gst) // 50) * 50
-
-    return run_fee, dsc_cost, prof_fee, stamp, label, subtotal_base, subtotal, gst, total
-
-
-# 🔹 Letterhead
-def first_page(canvas, doc):
-    canvas.drawImage("letterhead.png", 0, 0, width=595, height=842)
-
-def later_pages(canvas, doc):
-    pass
-
-
-# 🔹 PDF Generator
-def generate_pdf():
-    file = tempfile.NamedTemporaryFile(delete=False, suffix=".pdf")
-
-    doc = SimpleDocTemplate(
-        file.name,
-        pagesize=A4,
-        topMargin=110,
-        bottomMargin=70,
-        leftMargin=50,
-        rightMargin=50
-    )
+    doc = SimpleDocTemplate(buffer, pagesize=A4,
+                            rightMargin=36, leftMargin=36,
+                            topMargin=20, bottomMargin=18)
 
     styles = getSampleStyleSheet()
-    heading = styles["Heading2"]
-    normal = styles["Normal"]
 
-    run_fee, dsc_cost, prof_fee, stamp, label, subtotal_base, subtotal, gst, total = calculate_cost()
+    title_style = ParagraphStyle(
+        'title', parent=styles['Title'],
+        fontSize=14, textColor=colors.white, alignment=1,
+        leading=16
+    )
+
+    heading_style = ParagraphStyle(
+        'heading', parent=styles['Heading3'],
+        fontSize=10.5, textColor=colors.HexColor("#111827"), spaceAfter=2,
+        spaceBefore=1, leading=12.5
+    )
+
+    normal_style = ParagraphStyle(
+        'normal', parent=styles['Normal'],
+        fontSize=9.2, leading=12
+    )
+
+    watermark_style = ParagraphStyle(
+        'watermark',
+        parent=styles['Normal'],
+        fontSize=28,
+        textColor=colors.HexColor("#e5e7eb"),
+        alignment=1
+    )
+
+    # SAFE VALUES
+    renewal = safe_int(renewal)
+    offer = safe_int(offer)
+    tax_audit = safe_int(tax_audit)
+
+    # GST
+    ren_base, ren_gst = gst_breakup(renewal)
+    off_base, off_gst = gst_breakup(offer)
+    tax_base, tax_gst = gst_breakup(tax_audit)
+
+    one_year_total = renewal + tax_audit
+    total_price = one_year_total if plan == "1 Year Plan" else offer
 
     story = []
 
-    # 🔹 Opening
-    story.append(Paragraph(f"<b>Dear {client_name} Ji,</b>", normal))
-    story.append(Spacer(1, 6))
+    # 🔥 WATERMARK (light)
+    story.append(Paragraph("Neusource", watermark_style))
+    story.append(Spacer(1, -22))
+
+    # HEADER
+    header = Table([[Paragraph("Neusource Startup Minds India Limited", title_style)]], colWidths=[500])
+    header.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (-1, -1), colors.HexColor("#1d4ed8")),
+        ('TEXTCOLOR', (0, 0), (-1, -1), colors.white),
+        ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+        ('PADDING', (0, 0), (-1, -1), 6),
+    ]))
+
+    story.append(header)
+    story.append(Spacer(1, 5))
+
+    # LOGO
+    try:
+        story.append(Image("logo.png", width=75, height=22))
+        story.append(Spacer(1, 4))
+    except:
+        pass
+
+    # DATE
+    story.append(Paragraph(f"Date: {datetime.today().strftime('%d %B %Y')}", normal_style))
+    story.append(Spacer(1, 5))
+
+    # INTRO
+    story.append(Paragraph("Dear Sir,", normal_style))
+    story.append(Paragraph("Hope you are doing well.", normal_style))
+    story.append(Spacer(1, 2))
 
     story.append(Paragraph(
-        "As per our telephonic conversation regarding your inquiry, "
-        "<b>we are pleased to share our proposal for Company registration with you.</b>",
-        normal
+        "As discussed, please find below the proposal for annual statutory compliances for FY 2025–2026.",
+        normal_style
     ))
-    story.append(Spacer(1, 10))
 
-    # 🔹 Client Table
-    client_data = [
-        ["Client Name", client_name],
-        ["Company Type", company_type],
-        ["State", state],
-        ["Proposal Date", datetime.now().strftime("%d %B %Y")]
+    story.append(Spacer(1, 6))
+
+    # -------------------------
+    # BLOCK HELPER (card-style section with colored title bar)
+    # -------------------------
+    FULL_WIDTH = 523
+
+    box_header_style = ParagraphStyle(
+        'box_header', parent=styles['Heading3'],
+        fontSize=11, textColor=colors.white, leading=13,
+        spaceAfter=0, spaceBefore=0
+    )
+
+    def make_box(title, content_flowables, width=FULL_WIDTH, bar_color="#1d4ed8"):
+        box_data = [[Paragraph(title, box_header_style)], [content_flowables]]
+        box = Table(box_data, colWidths=[width])
+        box.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor(bar_color)),
+            ('TOPPADDING', (0, 0), (-1, 0), 4),
+            ('BOTTOMPADDING', (0, 0), (-1, 0), 4),
+            ('LEFTPADDING', (0, 0), (-1, 0), 10),
+            ('TOPPADDING', (0, 1), (-1, 1), 6),
+            ('BOTTOMPADDING', (0, 1), (-1, 1), 6),
+            ('LEFTPADDING', (0, 1), (-1, 1), 10),
+            ('RIGHTPADDING', (0, 1), (-1, 1), 10),
+            ('BACKGROUND', (0, 1), (-1, 1), colors.white),
+            ('BOX', (0, 0), (-1, -1), 0.75, colors.HexColor(bar_color)),
+            ('LINEBELOW', (0, 0), (-1, 0), 0.75, colors.HexColor(bar_color)),
+        ]))
+        return box
+
+    # -------------------------
+    # BLOCK 1: CLIENT DETAILS
+    # -------------------------
+    client_content = [
+        Paragraph(f"<b>Client Name:</b> {client_name}", normal_style),
+        Spacer(1, 3),
+        Paragraph(f"<b>Entity Type:</b> {entity_type}", normal_style),
+    ]
+    story.append(make_box("Client Details", client_content))
+    story.append(Spacer(1, 6))
+
+    # -------------------------
+    # BLOCK 2: SCOPE OF WORK
+    # -------------------------
+    scope_points = [
+
+        "A. Statutory Audit & Financials",
+
+        "Review, Finalization & Statutory Audit of Balance Sheet, Profit & Loss Account and Audit Report (based on books/records shared by the client)",
+
+        "B. ROC Annual Filings",
+
+        "Filing of Form AOC-4 – Financial Statements",
+
+        "Filing of Form MGT-7 / MGT-7A – Annual Return (as applicable)",
+
+        "Filing of Form ADT-1 – Appointment / Re-appointment of Statutory Auditor (if applicable)",
+
+        "Filing of Form DPT-3 – Return of Deposits (if applicable)",
+
+        "C. Income Tax Compliances",
+
+        "Income Tax Return Filing – Company",
+
+        "Income Tax Return Filing – Directors (If Opted)",
+
+        "Tax Audit (if applicable & charged in this proposal)",
+
+        "D. Director & Other Regulatory Compliances",
+
+        "DIR-3 KYC of All Directors"
     ]
 
-    table = Table(client_data, colWidths=[150, 250])
-    table.setStyle(TableStyle([
-        ("BACKGROUND", (0,0), (0,-1), "#D9EAF7"),
-        ("GRID", (0,0), (-1,-1), 1, "#A6A6A6"),
-    ]))
-
-    story.append(table)
-    story.append(Spacer(1, 15))
-
-        # 🔹 Scope
-    story.append(Paragraph("<b>Scope of Services:</b>", heading))
-
-    # 🔹 Dynamic Scope based on Company Type
-    adjusted_dsc = dsc_count  # always user input
-
-    if company_type == "LLP":
-        role = "Partners"
-        deed_text = "LLP Deed"
-
-    elif company_type == "OPC":
-        role = "Director & Nominee"
-        deed_text = "Memorandum & Articles (MOA & AOA)"
-
-    else:
-        role = "Directors"
-        deed_text = "Memorandum & Articles (MOA & AOA)"
-
-    scope = [
-        "Name Approval (RUN-Filing once)",
-        "Company Incorporation Certificate (COI)",
-        deed_text,
-        "Company PAN & TAN Registration",
-        "Bank Account Opening Support (BR)"
-    ]
-
-    # DSC / DIN
-    if adjusted_dsc > 0:
-
-        # 🔹 OPC special case
-        if company_type == "OPC":
-
-            if adjusted_dsc == 0:
-                pass  # kuch add nahi karna
-
-            elif adjusted_dsc == 1:
-                scope.insert(3, "1 DSC – Digital Signature Certificate (Class-3)")
-                scope.insert(4, "1 Director Identification Number")
-
-            elif adjusted_dsc == 2:
-                scope.insert(3, "1 Director & 1 Nominee (2 nos) – Digital Signature Certificate (Class-3)")
-                scope.insert(4, "1 Director Identification Number")
-
-        # 🔹 बाकी सभी cases
+    scope_content = []
+    for i, p in enumerate(scope_points):
+        if p.startswith(("A.", "B.", "C.", "D.")):
+            if i != 0:
+                scope_content.append(Spacer(1, 2))
+            scope_content.append(
+                Paragraph(f"<b><font color='#1d4ed8'>{p}</font></b>", heading_style)
+            )
         else:
-            scope.insert(3, f"{adjusted_dsc} {role} – Digital Signature Certificate (Class-3)")
-            scope.insert(4, f"{adjusted_dsc} {role} – Identification Number")
+            scope_content.append(Paragraph(f"• {p}", normal_style))
 
-    # PF / ESIC (not for LLP)
-    if company_type != "LLP":
-        scope.append("PF Registration")
-        scope.append("ESIC Registration")
+    story.append(make_box("Scope of Work", scope_content))
+    story.append(Spacer(1, 6))
 
-    # Add to PDF
-    for s in scope:
-        story.append(Paragraph(f"• {s}", normal))
+    # -------------------------
+    # BLOCK 3: FEE STRUCTURE
+    # -------------------------
+    table_data = [
+        ["Particulars", "Base", "GST", "Total"],
+        ["1 Year Plan", f"{ren_base:,}", f"{ren_gst:,}", f"{renewal:,}"],
+        ["Tax Audit", f"{tax_base:,}", f"{tax_gst:,}", f"{tax_audit:,}"],
+        ["★ 2+1 Offer (Recommended)", f"{off_base:,}", f"{off_gst:,}", f"{offer:,}"],
+        ["Total Payable", "", "", f"{total_price:,}"]
+    ]
 
-    story.append(Spacer(1, 10))
+    table = Table(table_data, colWidths=[173, 94, 94, 112])
 
-    # 🔹 Complimentary
-    story.append(Paragraph("<b>Complimentary Services:</b>", heading))
-    story.append(Paragraph("<font color='green'><b>• MSME Registration (Complimentary)</b></font>", normal))
-    story.append(Paragraph("<font color='green'><b>• GST Application Filing (Complimentary)</b></font>", normal))
+    table.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor("#1d4ed8")),
+        ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+        ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
+        ('FONTSIZE', (0, 0), (-1, -1), 9.5),
+        ('TOPPADDING', (0, 0), (-1, -1), 6),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
 
-    story.append(Spacer(1, 10))
+        # Recommended highlight
+        ('BACKGROUND', (0, 3), (-1, 3), colors.HexColor("#bbf7d0")),
+        ('FONTNAME', (0, 3), (-1, 3), 'Helvetica-Bold'),
 
-    # 🔹 Documents
-    story.append(Paragraph("<b>Required Documents for Company Registration:</b>", heading))
+        # Total
+        ('BACKGROUND', (0, -1), (-1, -1), colors.HexColor("#e0f2fe")),
+        ('FONTNAME', (0, -1), (-1, -1), 'Helvetica-Bold'),
+    ]))
 
-    # 🔹 Documents (Dynamic based on Company Type)
-    if company_type == "LLP":
-        docs = [
-            "At least 2 Proposed LLP Names",
-            "Nature of Business",
-            "Aadhar Card & PAN Card of All Partners",
-            "Contact Number & Email ID of All Partners",
-            "Passport Size Photograph of All Partners",
-            "Business Premises Photos (Inside & Outside)",
-            "Latest Bank Statement (with Name & Address)",
-            "Latest Electricity Bill (Office Address Proof)",
-            "Rent Agreement (if rented) along with Owner PAN & Contact Details"
-        ]
+    story.append(make_box("Fee Structure", [table]))
+    story.append(Spacer(1, 6))
 
-    elif company_type == "OPC":
-        docs = [
-            "At least 2 Proposed Company Names",
-            "Nature of Business",
-            "Aadhar Card & PAN Card of Director",
-            "Aadhar Card & PAN Card of Nominee",
-            "Contact Number & Email ID of Director & Nominee",
-            "Passport Size Photograph of Director & Nominee",
-            "Business Premises Photos (Inside & Outside)",
-            "Latest Bank Statement (with Name & Address)",
-            "Latest Electricity Bill (Office Address Proof)",
-            "Rent Agreement (if rented) along with Owner PAN & Contact Details"
-        ]
+    # -------------------------
+    # BLOCK 4: COST COMPARISON
+    # -------------------------
+    three_year_cost = one_year_total * 3
+    per_year = int(offer / 3)
+    savings = three_year_cost - offer
 
+    comp_data = [
+        ["Particulars", "Amount"],
+        ["1 Year Total", f"{one_year_total:,}"],
+        ["3 Year Cost (1 Year Plan)", f"{three_year_cost:,}"],
+        ["2+1 Offer", f"{offer:,}"],
+        ["Per Year Cost (2+1)", f"{per_year:,}"],
+        ["🔥 You Save", f"{savings:,}"]
+    ]
+
+    comp_table = Table(comp_data, colWidths=[293, 180])
+
+    comp_table.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (-1, 0), colors.black),
+        ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+        ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
+        ('FONTSIZE', (0, 0), (-1, -1), 9.5),
+        ('TOPPADDING', (0, 0), (-1, -1), 6),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
+
+        ('BACKGROUND', (0, -1), (-1, -1), colors.HexColor("#bbf7d0")),
+        ('FONTNAME', (0, -1), (-1, -1), 'Helvetica-Bold'),
+    ]))
+
+    story.append(make_box("Cost Comparison", [comp_table], bar_color="#111827"))
+    story.append(Spacer(1, 6))
+
+    # CLOSING
+    story.append(Paragraph("We assure you of timely and accurate compliance support.", normal_style))
+    story.append(Paragraph("<b>Thank you for being with us.</b>", normal_style))
+
+    doc.build(story)
+    buffer.seek(0)
+
+    return buffer
+# -------------------------
+# CARD
+# -------------------------
+def card(title, value):
+    return f"""
+    <div class="card">
+        <div class="label">{title}</div>
+        <div class="value">{value}</div>
+    </div>
+    """
+
+# -------------------------
+# UI
+# -------------------------
+st.title("📊 Client Renewal Dashboard")
+
+client_code = st.text_input("Enter Client Code")
+
+# 🔥 IMPORTANT: remove button dependency
+if client_code:
+
+    data = df[df["ClientCode"].astype(str) == client_code]
+
+    if data.empty:
+        st.error("Client not found ❌")
     else:
-        docs = [
-            "At least 2 Proposed Company Names",
-            "Nature of Business",
-            "Aadhar Card & PAN Card of All Directors",
-            "Contact Number & Email ID of All Directors",
-            "Passport Size Photograph of All Directors",
-            "Business Premises Photos (Inside & Outside)",
-            "Latest Bank Statement (with Name & Address)",
-            "Latest Electricity Bill (Office Address Proof)",
-            "Rent Agreement (if rented) along with Owner PAN & Contact Details"
-        ]
 
-    for d in docs:
-        story.append(Paragraph(f"• {d}", normal))
+        # -------------------------
+        # COMPANY DROPDOWN (FIXED)
+        # -------------------------
+        if len(data) > 1:
+            selected_company = st.selectbox(
+                "Select Company",
+                data["FileName"].unique()
+            )
+            row = data[data["FileName"] == selected_company].iloc[0]
+        else:
+            row = data.iloc[0]
 
-    # 🔹 Page Break
-    story.append(PageBreak())
+        company = row.get("FileName", "Client")
 
-    # 🔹 Pricing Table
-    story.append(Paragraph("<b>Pricing Breakdown (Standard Authorised Capital of Rs 1.0 Lakh)</b>", heading))
-    story.append(Spacer(1, 8))
+        st.success(company)
 
-    pricing = [
-        ["Particulars","Amount (INR)"],
-        ["RUN Fee",f"INR {run_fee}"]
-    ]
+        # -------------------------
+        # OVERVIEW
+        # -------------------------
+        c1, c2, c3, c4, c5 = st.columns(5)
 
-    if dsc_count > 0:
-        pricing.append([f"DSC Cost ({dsc_count} nos.)", f"INR {dsc_cost}"])
+        c1.markdown(card("Client Code", row['ClientCode']), unsafe_allow_html=True)
+        c2.markdown(card("Company", company), unsafe_allow_html=True)
+        c3.markdown(card("Entity", row['Co Type']), unsafe_allow_html=True)
+        c4.markdown(card("Turnover 23-24", format_inr(row.get('Turn over 23-24',0))), unsafe_allow_html=True)
+        c5.markdown(card("Turnover 24-25", format_inr(row.get('Turn over 24-25',0))), unsafe_allow_html=True)
 
-    pricing.extend([
-        [label, f"INR {stamp}"],
-        ["Subtotal",f"INR {subtotal_base}"],
-        ["Professional Fees",f"INR {prof_fee}"],
-        ["GST (18%)",f"INR {int(gst)}"],
-        ["TOTAL",f"INR {int(total)}"]
-    ])
+        # -------------------------
+        # FEE SUMMARY
+        # -------------------------
+        st.subheader("💰 Fee Summary")
 
-    subtotal_index = 3 if dsc_count > 0 else 2
+        c1, c2, c3 = st.columns(3)
 
-    ptable = Table(pricing, colWidths=[250,150])
-    ptable.setStyle(TableStyle([
-        ("BACKGROUND",(0,0),(-1,0),"#0B5394"),
-        ("TEXTCOLOR",(0,0),(-1,0),"white"),
-        ("GRID",(0,0),(-1,-1),1,"#A6A6A6"),
-        ("BACKGROUND",(0,subtotal_index),(-1,subtotal_index),"#D9EAF7"),
-        ("FONTNAME",(0,subtotal_index),(-1,subtotal_index),"Helvetica-Bold"),
-        ("BACKGROUND",(0,-1),(-1,-1),"#0B5394"),
-        ("TEXTCOLOR",(0,-1),(-1,-1),"white"),
-    ]))
+        c1.markdown(card("FY 23-24", format_inr(row.get("Fee 23-24",0))), unsafe_allow_html=True)
+        c2.markdown(card("FY 24-25", format_inr(row.get("Fee 24-25",0))), unsafe_allow_html=True)
+        c3.markdown(card("Current Total", format_inr(row.get("Total",0))), unsafe_allow_html=True)
 
-    story.append(ptable)
+        # -------------------------
+        # RENEWAL + TAX AUDIT FIX
+        # -------------------------
+        renewal = 0
+        offer = 0
 
-    # 🔹 Timeline
-    story.append(Spacer(1, 12))
-    story.append(Paragraph("<b>Process Timelines:</b>", heading))
+        for col in df.columns:
+            if "renewal" in col.lower():
+                renewal = row[col]
+            if "offer" in col.lower():
+                offer = row[col]
 
-    timeline = [
-        ["Step","Process","Time"],
-        ["1","Name Approval(Run Filing)","6-7 days"],
-        ["2","DSC Creation","3-4 days"],
-        ["3","MOA & AOA Drafting","2-3 days"],
-        ["4","Incorporation Filing (Spice+)","3-4 days"],
-        ["5","COI Issuance+ DIN/PAN/TAN/CIN Allocation","8-10 days"],
-        ["","Total","25-30 days"]
-    ]
+        tax_audit_2526 = row.get("Tax Audit 25-26", 0)
 
-    ttable = Table(timeline, colWidths=[60,220,120])
-    ttable.setStyle(TableStyle([
-        ("BACKGROUND",(0,0),(-1,0),"#2E8B57"),
-        ("TEXTCOLOR",(0,0),(-1,0),"white"),
-        ("GRID",(0,0),(-1,-1),1,"#A6A6A6"),
-        ("BACKGROUND",(0,-1),(-1,-1),"#F57C00"),
-        ("TEXTCOLOR",(0,-1),(-1,-1),"white"),
-    ]))
+        st.subheader("🚀 Renewal Pricing")
 
-    story.append(ttable)
+        c1, c2, c3 = st.columns(3)
 
-    # 🔹 Note
-    story.append(Spacer(1, 8))
-    story.append(Paragraph("<b>Note:</b>", normal))
-    story.append(Paragraph("TAT is on an approximate basis and depends on MCA approvals.", normal))
+        c1.markdown(f"""
+        <div class="card primary">
+            <div class="label">1 Year Plan</div>
+            <div class="value">{format_inr(renewal)}</div>
+        </div>
+        """, unsafe_allow_html=True)
 
-    # 🔹 Important Notes
-    story.append(Spacer(1, 10))
-    story.append(Paragraph("<b>Important Notes:</b>", heading))
-    story.append(Paragraph("• Payment must be cleared after RUN approval.", normal))
-    story.append(Paragraph("• RUN does not guarantee name approval. Re-application will be charged separately.", normal))
+        c2.markdown(f"""
+        <div class="card success">
+            <div class="label">2+1 Offer</div>
+            <div class="value">{format_inr(offer)}</div>
+        </div>
+        """, unsafe_allow_html=True)
 
-    # 🔹 Closing
-    story.append(Spacer(1, 15))
-    story.append(Paragraph("<b>Warm Regards,</b>", normal))
-    story.append(Spacer(1, 12))
+        # 🔥 NEW (Tax Audit in renewal section)
+        c3.markdown(f"""
+<div class="card" style="background:#f59e0b;color:white;">
+    <div class="label" style="color:white;">Tax Audit 25-26</div>
+    <div class="value">{format_inr(tax_audit_2526)}</div>
+</div>
+""", unsafe_allow_html=True)
 
-    story.append(Paragraph(f"<b>{consultant_name}</b>", normal))
-    story.append(Paragraph("Startup Consultant", normal))
-    story.append(Paragraph(f"Mobile: {consultant_mobile}", normal))
-    story.append(Paragraph(f"Email: {consultant_email}", normal))
+        # -------------------------
+        # PDF
+        # -------------------------
+        st.subheader("📄 Download Proposal")
 
-    doc.build(story, onFirstPage=first_page, onLaterPages=later_pages)
+        col1, col2 = st.columns(2)
 
-    return file.name
+        with col1:
+            pdf1 = generate_pdf_bytes(
+    company,
+    row.get("Co Type", ""),
+    "1 Year Plan",
+    renewal,
+    offer,
+    tax_audit_2526
+)
+            st.download_button("⬇️ 1 Year Proposal", pdf1, "proposal_1_year.pdf")
 
-
-# 🔹 Button
-if st.button("Generate Proposal"):
-    pdf = generate_pdf()
-    with open(pdf, "rb") as f:
-        st.download_button("Download Proposal", f, file_name="proposal.pdf")
+        with col2:
+            pdf2 = generate_pdf_bytes(
+    company,
+    row.get("Co Type", ""),
+    "2+1 Offer",
+    renewal,
+    offer,
+    tax_audit_2526
+)	
+            st.download_button("⬇️ 2+1 Proposal", pdf2, "proposal_2plus1.pdf")
